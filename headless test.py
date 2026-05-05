@@ -37,21 +37,14 @@ def send_discord_alert(message: str):
         print(f"[ERROR] Discord webhook failed: {e}")
 
 # ----------------------------
-# AVAILABILITY CHECK (PLAYWRIGHT)
+# AVAILABILITY CHECK
 # ----------------------------
 def is_available(page) -> bool:
     try:
-        # Wait for main content
         page.wait_for_selector("#productTitle", timeout=5000)
 
-        # Check for Add to Cart button
         add_to_cart = page.query_selector("#add-to-cart-button")
-
-        # Check for "Currently unavailable"
         unavailable = page.locator("text=Currently unavailable").count() > 0
-
-        # Check for alternate state
-        buying_options = page.locator("text=See All Buying Options").count() > 0
 
         return add_to_cart is not None and not unavailable
 
@@ -59,7 +52,7 @@ def is_available(page) -> bool:
         return False
 
 # ----------------------------
-# POPUP + SOUND (same as yours)
+# POPUP + SOUND
 # ----------------------------
 alarm_active = False
 
@@ -100,7 +93,7 @@ cycle = 0
 # MAIN LOOP
 # ----------------------------
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)  # <-- IMPORTANT
+    browser = p.chromium.launch(headless=False)
     context = browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
     )
@@ -113,23 +106,42 @@ with sync_playwright() as p:
 
         print(f"\n=== Cycle #{cycle} | {cycle_time} ===")
 
+        # ----------------------------
+        # FIRST RUN (INITIAL BASELINE)
+        # ----------------------------
+        if first_run:
+            for item in ITEMS:
+                try:
+                    page.goto(item["url"], timeout=30000)
+                    available = is_available(page)
+
+                    name = item["name"]
+                    state_text = "ACTIVE" if available else "INACTIVE"
+
+                    msg = f"[INIT] {cycle_time} | {name} -> {state_text}"
+                    print(msg)
+                    send_discord_alert(msg)
+
+                    status[name] = available
+
+                except Exception as e:
+                    print(f"[ERROR] {item['name']} -> {e}")
+
+            first_run = False
+            print("Baseline status stored. Monitoring started.")
+            continue
+
+        # ----------------------------
+        # NORMAL MONITORING
+        # ----------------------------
         changed_items = []
 
         for item in ITEMS:
             try:
                 page.goto(item["url"], timeout=30000)
-
                 available = is_available(page)
 
                 name = item["name"]
-                state_text = "ACTIVE" if available else "INACTIVE"
-
-                if first_run:
-                    msg = f"[INIT] {cycle_time} | {name} -> {state_text}"
-                    print(msg)
-                    send_discord_alert(msg)
-                    status[name] = available
-                    continue
 
                 if name in status and status[name] != available:
                     changed_items.append((name, available, item["url"]))
@@ -141,13 +153,11 @@ with sync_playwright() as p:
             except Exception as e:
                 print(f"[ERROR] {item['name']} -> {e}")
 
-        if first_run:
-            first_run = False
-            print("Baseline status stored. Monitoring started.")
-            continue
-
+        # ----------------------------
+        # REPORTING
+        # ----------------------------
         if not changed_items:
-            msg = f"Cycle #{cycle}: no status changes"
+            msg = f"[CYCLE] {cycle_time} | Cycle #{cycle} | no status changes"
             print(msg)
             send_discord_alert(msg)
         else:
@@ -157,8 +167,10 @@ with sync_playwright() as p:
 
                 print(msg)
                 send_discord_alert(msg)
-                show_popup("STATUS CHANGE", msg)
+
+                if available:
+                    show_popup("ITEM AVAILABLE", msg)
 
         print("=" * 60)
 
-        time.sleep(random.uniform(60, 180))
+        time.sleep(random.uniform(30, 120))
