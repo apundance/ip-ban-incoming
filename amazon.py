@@ -25,7 +25,7 @@ ITEMS = [
 ]
 
 # ----------------------------
-# DISCORD WEBHOOK
+# DISCORD
 # ----------------------------
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1501086028042342481/Vsq-rZPxZeO0-1JwzFqv6jOBOmg2bo_mAsLTKSaIoFIEkS2UAnc9AJnhRsMIrR-vM8JD"
 
@@ -39,8 +39,7 @@ def send_discord_alert(message: str):
 # HEADERS
 # ----------------------------
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0",
     "Accept-Language": "en-US,en;q=0.9"
 }
 
@@ -55,13 +54,7 @@ def is_available(html: str) -> bool:
     )
 
 # ----------------------------
-# STATE STORAGE
-# ----------------------------
-status = {}
-first_run = True
-
-# ----------------------------
-# SOUND + POPUP SYSTEM
+# POPUP + SOUND
 # ----------------------------
 alarm_active = False
 
@@ -86,71 +79,86 @@ def show_popup(title, message):
     root.geometry("500x220")
     root.attributes("-topmost", True)
 
-    label = tk.Label(
-        root,
-        text=message,
-        wraplength=450,
-        font=("Arial", 12)
-    )
-    label.pack(pady=20)
-
-    btn = tk.Button(root, text="ACKNOWLEDGE", command=acknowledge, height=2, width=20)
-    btn.pack(pady=10)
+    tk.Label(root, text=message, wraplength=450, font=("Arial", 12)).pack(pady=20)
+    tk.Button(root, text="ACKNOWLEDGE", command=acknowledge, height=2, width=20).pack(pady=10)
 
     root.mainloop()
+
+# ----------------------------
+# STATE
+# ----------------------------
+status = {}
+first_run = True
+cycle = 0
 
 # ----------------------------
 # MAIN LOOP
 # ----------------------------
 while True:
+    cycle += 1
     cycle_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"\n--- Cycle started at {cycle_time} ---")
+
+    print(f"\n=== Cycle #{cycle} | {cycle_time} ===")
+
+    changed_items = []
 
     for item in ITEMS:
         try:
-            request_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
             response = requests.get(item["url"], headers=headers, timeout=10)
-            html = response.text
+            available = is_available(response.text)
 
-            available = is_available(html)
             name = item["name"]
-
-            previous = status.get(name)
-
             state_text = "ACTIVE" if available else "INACTIVE"
-            print(f"[{request_time}] {name} -> {state_text}")
 
             # ----------------------------
-            # INIT
+            # FIRST RUN (BASELINE)
             # ----------------------------
             if first_run:
-                init_msg = f"[INIT] {request_time} | {name} | {state_text}"
-                send_discord_alert(init_msg)
-
-            # ----------------------------
-            # STATUS CHANGE
-            # ----------------------------
-            elif previous is not None and previous != available:
-                if available:
-                    msg = f"[STATUS CHANGE] {request_time} | {name} | NOW ACTIVE | {item['url']}"
-                else:
-                    msg = f"[STATUS CHANGE] {request_time} | {name} | NOW INACTIVE"
-
+                msg = f"[INIT] {cycle_time} | {name} -> {state_text}"
+                print(msg)
                 send_discord_alert(msg)
 
-                # ALERT (popup + sound)
-                show_popup("STATUS CHANGE", msg)
+                status[name] = available
+                continue
 
-            else:
-                print(f"[{request_time}] {name} status unchanged")
+            # ----------------------------
+            # COMPARE STATES (FIXED - NO "previous" BUG)
+            # ----------------------------
+            if name in status and status[name] != available:
+                changed_items.append((name, available, item["url"]))
+                status[name] = available
 
-            status[name] = available
+            elif name not in status:
+                status[name] = available
 
         except Exception as e:
             print(f"[ERROR] {item['name']} -> {e}")
 
-    first_run = False
+    # ----------------------------
+    # END FIRST RUN
+    # ----------------------------
+    if first_run:
+        first_run = False
+        print("Baseline status stored. Monitoring started.")
+        continue
 
-    print("\n" + "=" * 60)
+    # ----------------------------
+    # OUTPUT
+    # ----------------------------
+    if not changed_items:
+        msg = f"Cycle #{cycle}: no status changes"
+        print(msg)
+        send_discord_alert(msg)
+
+    else:
+        for name, available, url in changed_items:
+            state_text = "NOW ACTIVE" if available else "NOW INACTIVE"
+            msg = f"[STATUS CHANGE] {cycle_time} | {name} | {state_text} | {url}"
+
+            print(msg)
+            send_discord_alert(msg)
+            show_popup("STATUS CHANGE", msg)
+
+    print("=" * 60)
+
     time.sleep(random.uniform(60, 180))
