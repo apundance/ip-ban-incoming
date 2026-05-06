@@ -21,7 +21,13 @@ ITEMS = [
     }
 ]
 
+# Original logging webhook
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1501086028042342481/Vsq-rZPxZeO0-1JwzFqv6jOBOmg2bo_mAsLTKSaIoFIEkS2UAnc9AJnhRsMIrR-vM8JD"
+
+# NEW: alert webhook + user ping
+DISCORD_WEBHOOK_URL_ALERT = "https://discord.com/api/webhooks/1501398425084624947/ui96sjHQ8hdBCcHwHnCafCpP5Zm26cs0cJFhuMcKe4I4QkSuCyz5X8jGuK6N0WDb7Kat"
+DISCORD_USER_ID = "652031558210813961"  # replace with your actual user ID
+DISCORD_USER_ID2 = "359832173882245120"
 
 # ----------------------------
 # DISCORD
@@ -32,6 +38,15 @@ def send_discord_alert(message: str):
     except Exception as e:
         print(f"[ERROR] Discord webhook failed: {e}")
 
+def send_discord_ping(message: str):
+    try:
+        payload = {
+            "content": f"<@{DISCORD_USER_ID}>, <@{DISCORD_USER_ID2}> {message}"
+        }
+        requests.post(DISCORD_WEBHOOK_URL_ALERT, json=payload, timeout=10)
+    except Exception as e:
+        print(f"[ERROR] Discord ping webhook failed: {e}")
+
 # ----------------------------
 # AVAILABILITY CHECK
 # ----------------------------
@@ -39,7 +54,6 @@ def is_available(page) -> bool:
     try:
         page.wait_for_selector("#productTitle", timeout=5000)
 
-        # Any purchase-related UI
         purchase_signals = [
             "#add-to-cart-button",
             "#buy-now-button",
@@ -50,14 +64,12 @@ def is_available(page) -> bool:
             if page.query_selector(selector):
                 return True
 
-        # Text-based signals
         if page.locator("text=See All Buying Options").count() > 0:
             return True
 
         if page.locator("text=Pre-order").count() > 0:
             return True
 
-        # Hard negative
         if page.locator("text=Currently unavailable").count() > 0:
             return False
 
@@ -144,6 +156,11 @@ def monitor_worker(worker_id, item):
                     print(msg)
                     send_discord_alert(msg)
 
+                    # ✅ ONLY ping when item becomes available
+                    if available:
+                        send_discord_ping(msg)
+                        show_popup("ITEM AVAILABLE", msg)
+
                     local_status = available
 
                     if available:
@@ -155,15 +172,11 @@ def monitor_worker(worker_id, item):
                     print(msg)
                     send_discord_alert(msg)
 
-                
-
             except Exception as e:
                 print(f"[Worker {worker_id} ERROR] {name} -> {e}")
 
             print("=" * 60)
-
             time.sleep(random.uniform(30, 120))
-
 
 # ----------------------------
 # START WORKERS
@@ -180,9 +193,7 @@ if __name__ == "__main__":
         t.start()
         threads.append(t)
 
-        # Stagger start (important)
         time.sleep(10)
 
-    # Keep script alive
     while True:
         time.sleep(1)
